@@ -252,16 +252,6 @@ int main(int argc, char *argv[]) {
 
           if (eos) {
             feature_pipeline.InputFinished();
-
-            if (silence_weighting.Active() &&
-                feature_pipeline.IvectorFeature() != NULL) {
-              silence_weighting.ComputeCurrentTraceback(decoder.Decoder());
-              silence_weighting.GetDeltaWeights(feature_pipeline.NumFramesReady(),
-                                                frame_offset * decodable_opts.frame_subsampling_factor,
-                                                &delta_weights);
-              feature_pipeline.UpdateFrameWeights(delta_weights);
-            }
-
             decoder.AdvanceDecoding();
             decoder.FinalizeDecoding();
             frame_offset += decoder.NumFramesDecoded();
@@ -293,9 +283,9 @@ int main(int argc, char *argv[]) {
               feature_pipeline.IvectorFeature() != NULL) {
             silence_weighting.ComputeCurrentTraceback(decoder.Decoder());
             silence_weighting.GetDeltaWeights(feature_pipeline.NumFramesReady(),
-                                              frame_offset * decodable_opts.frame_subsampling_factor,
                                               &delta_weights);
-            feature_pipeline.UpdateFrameWeights(delta_weights);
+            feature_pipeline.UpdateFrameWeights(delta_weights,
+                                                frame_offset * decodable_opts.frame_subsampling_factor);
           }
 
           decoder.AdvanceDecoding();
@@ -314,8 +304,8 @@ int main(int argc, char *argv[]) {
                 msg = GetTimeString(t_beg, t_end, frame_shift * frame_subsampling) + " " + msg;
               }
 
-              KALDI_VLOG(1) << "Temporary transcript: " << msg;
-              server.WriteLn(msg, "\r");
+//YE              KALDI_VLOG(1) << "Temporary transcript: " << msg;
+//YE              server.WriteLn(msg, "\r");
             }
             check_count += check_period;
           }
@@ -433,28 +423,26 @@ bool TcpServer::ReadChunk(size_t len) {
 
   ssize_t ret;
   int poll_ret;
-  char *samp_buf_p = reinterpret_cast<char *>(samp_buf_);
-  size_t to_read = len * sizeof(int16);
+  size_t to_read = len;
   has_read_ = 0;
   while (to_read > 0) {
     poll_ret = poll(client_set_, 1, read_timeout_);
     if (poll_ret == 0) {
-      KALDI_WARN << "Socket timeout! Disconnecting..." << "(has_read_ = " << has_read_ << ")";
+      KALDI_WARN << "Socket timeout! Disconnecting...";
       break;
     }
-    if (poll_ret < 0) {
+    if (client_set_[0].revents != POLLIN) {
       KALDI_WARN << "Socket error! Disconnecting...";
       break;
     }
-    ret = read(client_desc_, static_cast<void *>(samp_buf_p + has_read_), to_read);
+    ret = read(client_desc_, static_cast<void *>(samp_buf_ + has_read_), to_read * sizeof(int16));
     if (ret <= 0) {
       KALDI_WARN << "Stream over...";
       break;
     }
-    to_read -= ret;
-    has_read_ += ret;
+    to_read -= ret / sizeof(int16);
+    has_read_ += ret / sizeof(int16);
   }
-  has_read_ /= sizeof(int16);
 
   return has_read_ > 0;
 }
